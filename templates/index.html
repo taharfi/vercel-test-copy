@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Manga Batch Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Local Automation</p>
+          <h1>Manga upload dashboard</h1>
+          <p class="subtle">Run the Python batch locally, paste your manga list, and watch WordPress upload results from the browser.</p>
+        </div>
+        <div class="status-card">
+          <span class="status-label">Status</span>
+          <strong class="{{ 'running' if running else 'idle' }}">{{ 'Running' if running else 'Idle' }}</strong>
+        </div>
+      </section>
+
+      <section class="grid">
+        <div class="stack">
+          <form class="panel form-panel" method="post" action="{{ url_for('fetch_categories') }}">
+            <h2>Connection</h2>
+            <label>
+              <span>WordPress Base URL</span>
+              <input name="wordpress_base_url" value="{{ form.wordpress_base_url }}" placeholder="https://example.com">
+            </label>
+            <label>
+              <span>WordPress Username</span>
+              <input name="wordpress_username" value="{{ form.wordpress_username }}">
+            </label>
+            <label>
+              <span>Application Password</span>
+              <input name="wordpress_app_password" type="password" value="{{ form.wordpress_app_password }}">
+            </label>
+            <label>
+              <span>Gemini API Key</span>
+              <input name="gemini_api_key" type="password" value="{{ form.gemini_api_key }}">
+            </label>
+            <label>
+              <span>Additional Gemini API Keys</span>
+              <textarea name="gemini_api_keys" rows="5" placeholder="One API key per line">{{ form.gemini_api_keys }}</textarea>
+            </label>
+            <label>
+              <span>WP Admin Username</span>
+              <input name="wp_admin_username" value="{{ form.wp_admin_username }}">
+            </label>
+            <label>
+              <span>WP Admin Password</span>
+              <input name="wp_admin_password" type="password" value="{{ form.wp_admin_password }}">
+            </label>
+            <label>
+              <span>Category Thumbnail Meta Key</span>
+              <input name="category_thumbnail_meta_key" value="{{ form.category_thumbnail_meta_key or 'category_thumbnail_id' }}">
+            </label>
+            <label>
+              <span>Prompt Templates</span>
+              <textarea name="prompt_templates" rows="10" placeholder="Separate prompts with a line containing ---">{{ form.prompt_templates }}</textarea>
+            </label>
+            <label>
+              <span>Sleep Seconds Between Manga</span>
+              <input name="sleep_seconds" type="number" min="0" value="{{ form.sleep_seconds or '60' }}">
+            </label>
+            <button type="submit" {% if running %}disabled{% endif %}>Fetch Manga Categories</button>
+            <p class="hint">Use placeholders like <code>{title}</code>, <code>{language}</code>, and <code>{alternate_names}</code>. Separate prompt variants with a line that contains only <code>---</code>.</p>
+          </form>
+
+          <section class="panel">
+            <h2>Live logs</h2>
+            <div class="log-box">
+              {% if logs %}
+                {% for log in logs %}
+                  <div class="log-line">{{ log }}</div>
+                {% endfor %}
+              {% else %}
+                <div class="empty">No logs yet.</div>
+              {% endif %}
+            </div>
+          </section>
+        </div>
+
+        <div class="stack">
+          <form class="panel form-panel" method="post" action="{{ url_for('run') }}">
+            <h2>Select manga</h2>
+            <input type="hidden" name="wordpress_base_url" value="{{ form.wordpress_base_url }}">
+            <input type="hidden" name="wordpress_username" value="{{ form.wordpress_username }}">
+            <input type="hidden" name="wordpress_app_password" value="{{ form.wordpress_app_password }}">
+            <input type="hidden" name="gemini_api_key" value="{{ form.gemini_api_key }}">
+            <textarea name="gemini_api_keys" hidden>{{ form.gemini_api_keys }}</textarea>
+            <input type="hidden" name="wp_admin_username" value="{{ form.wp_admin_username }}">
+            <input type="hidden" name="wp_admin_password" value="{{ form.wp_admin_password }}">
+            <input type="hidden" name="category_thumbnail_meta_key" value="{{ form.category_thumbnail_meta_key or 'category_thumbnail_id' }}">
+            <textarea name="prompt_templates" hidden>{{ form.prompt_templates }}</textarea>
+            <input type="hidden" name="sleep_seconds" value="{{ form.sleep_seconds or '60' }}">
+
+            {% if categories %}
+              <div class="selection-tools">
+                <span class="hint">{{ categories|length }} categories fetched.</span>
+                <div class="selection-actions">
+                  <button type="button" class="secondary-button" onclick="setAllCheckboxes(true)">Check all</button>
+                  <button type="button" class="secondary-button" onclick="setAllCheckboxes(false)">Uncheck all</button>
+                </div>
+              </div>
+
+              <div class="category-list">
+                {% for category in categories %}
+                  <label class="category-row">
+                    <span class="check-wrap">
+                      <input
+                        type="checkbox"
+                        name="selected_category_ids"
+                        value="{{ category.id }}"
+                        {% if category.selected or not category.description %}checked{% endif %}
+                        {% if running %}disabled{% endif %}
+                      >
+                    </span>
+                    <span class="category-main">
+                      <strong>{{ category.clean_name }}</strong>
+                      <small>ID {{ category.id }} | {{ category.language }}</small>
+                    </span>
+                    <span class="category-meta {{ 'missing' if not category.description else 'has-description' }}">
+                      {{ 'Missing description' if not category.description else 'Has description' }}
+                    </span>
+                  </label>
+                {% endfor %}
+              </div>
+            {% else %}
+              <div class="empty">No categories fetched yet. Fill the connection form and click "Fetch Manga Categories".</div>
+            {% endif %}
+
+            <button type="submit" {% if running or not categories %}disabled{% endif %}>{{ 'Running...' if running else 'Run Selected Manga' }}</button>
+            <p class="hint">Categories without descriptions are preselected so you can review the list and launch only what you want.</p>
+          </form>
+
+          <section class="panel">
+            <h2>Results</h2>
+            {% if results %}
+              <table>
+                <thead>
+                  <tr>
+                    <th>Category</th>
+                    <th>Title</th>
+                    <th>Language</th>
+                    <th>Status</th>
+                    <th>Error</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for row in results %}
+                    <tr>
+                      <td>{{ row.category_id }}</td>
+                      <td>{{ row.title }}</td>
+                      <td>{{ row.language }}</td>
+                      <td>{{ row.status }}</td>
+                      <td>{{ row.error or '' }}</td>
+                    </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            {% else %}
+              <div class="empty">No results yet.</div>
+            {% endif %}
+          </section>
+        </div>
+      </section>
+    </main>
+    <script>
+      const isRunning = {{ 'true' if running else 'false' }};
+
+      function setAllCheckboxes(checked) {
+        const checkboxes = document.querySelectorAll('input[name="selected_category_ids"]');
+        checkboxes.forEach((checkbox) => {
+          if (!checkbox.disabled) {
+            checkbox.checked = checked;
+          }
+        });
+      }
+
+      if (isRunning) {
+        window.setTimeout(() => {
+          window.location.reload();
+        }, 5000);
+      }
+    </script>
+  </body>
+</html>
