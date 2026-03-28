@@ -13,7 +13,6 @@ from playwright.sync_api import sync_playwright
 
 
 MANGAS_FILE = Path("mangas.txt")
-TEMP_IMAGE_PATH = Path("temp_banner.webp")
 DEBUG_DIR = Path("debug")
 JIKAN_SEARCH_URL = "https://api.jikan.moe/v4/manga"
 WP_MEDIA_ENDPOINT = "/wp-json/wp/v2/media"
@@ -286,32 +285,31 @@ def generate_description(
     raise RuntimeError("Gemini generation failed after all retries")
 
 
-def download_image(image_url: str, destination: Path) -> None:
+def download_image_bytes(image_url: str) -> bytes:
     response = requests.get(image_url, timeout=60)
     response.raise_for_status()
-    destination.write_bytes(response.content)
+    return response.content
 
 
 def upload_media(
     wordpress_base_url: str,
     auth_headers: Dict[str, str],
-    image_path: Path,
+    image_bytes: bytes,
     manga_name: str,
 ) -> int:
     filename_slug = slugify_filename(manga_name)
     upload_filename = f"{filename_slug}.webp"
 
-    with image_path.open("rb") as handle:
-        response = requests.post(
-            f"{wordpress_base_url.rstrip('/')}{WP_MEDIA_ENDPOINT}",
-            headers={
-                **auth_headers,
-                "Content-Disposition": f'attachment; filename="{upload_filename}"',
-                "Content-Type": "image/webp",
-            },
-            data=handle.read(),
-            timeout=60,
-        )
+    response = requests.post(
+        f"{wordpress_base_url.rstrip('/')}{WP_MEDIA_ENDPOINT}",
+        headers={
+            **auth_headers,
+            "Content-Disposition": f'attachment; filename="{upload_filename}"',
+            "Content-Type": "image/webp",
+        },
+        data=image_bytes,
+        timeout=60,
+    )
     response.raise_for_status()
     payload = response.json()
     media_id = payload.get("id")
@@ -503,9 +501,9 @@ def process_manga(
     )
     logger(f"[INFO] Gemini description generated for '{clean_name}'.")
     logger(f"[INFO] Downloading cover image for '{clean_name}'.")
-    download_image(image_url, TEMP_IMAGE_PATH)
+    image_bytes = download_image_bytes(image_url)
     logger(f"[INFO] Uploading media to WordPress for '{clean_name}'.")
-    media_id = upload_media(wordpress_base_url, auth_headers, TEMP_IMAGE_PATH, clean_name)
+    media_id = upload_media(wordpress_base_url, auth_headers, image_bytes, clean_name)
     logger(f"[INFO] Media uploaded for '{clean_name}' with ID {media_id}.")
     try:
         logger(f"[INFO] Attempting REST category update for '{clean_name}'.")
